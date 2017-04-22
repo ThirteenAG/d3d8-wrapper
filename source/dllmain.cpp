@@ -11,6 +11,8 @@
 bool bForceWindowedMode;
 bool bSetVertexShaderConstantHook;
 bool bDirect3D8DisableMaximizedWindowedModeShim;
+bool bFPSLimit;
+float fFPSLimit;
 
 struct d3d8_dll
 {
@@ -34,6 +36,55 @@ IDirect3D8* WINAPI Direct3DCreate8Callback(UINT SDKVersion)
     IDirect3D8* Direct3D = OriginalDirect3DCreate8(SDKVersion);
     IDirect3D8* WrappedDirect3D = new Direct3D8Wrapper(Direct3D);
     return WrappedDirect3D;
+}
+
+HRESULT Direct3DDevice8Wrapper::Present(CONST RECT *pSourceRect, CONST RECT *pDestRect, HWND hDestWindowOverride, CONST RGNDATA *pDirtyRegion)
+{
+    if (bFPSLimit)
+    {
+        static LARGE_INTEGER Frequency;
+        static LARGE_INTEGER currCounter;
+        static LARGE_INTEGER startCounter;
+        static DWORD nextTicks;
+        static float curFPS;
+
+        static DWORD updateInterval = 1000;
+        static DWORD startTime = 0;
+        static DWORD nfps = 0;
+
+        nfps++;
+
+        auto dt = GetTickCount() - startTime;
+        curFPS = (float)(nfps*1000.0 / (float)dt);
+
+        if (dt > updateInterval) {
+            nfps = 0;
+            startTime = GetTickCount() + 1;
+        }
+
+        QueryPerformanceCounter(&currCounter);
+        while (currCounter.QuadPart <= (startCounter.QuadPart + nextTicks))
+        {
+            if (curFPS > fFPSLimit)
+            {
+                Sleep(1);
+            }
+            else
+                break;
+
+            QueryPerformanceCounter(&currCounter);
+        }
+        auto hr = Direct3DDevice8->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
+        QueryPerformanceFrequency(&Frequency);
+        nextTicks = (DWORD)((float)Frequency.QuadPart / fFPSLimit);
+        currCounter.QuadPart = 0;
+        startCounter.QuadPart = 0;
+        QueryPerformanceCounter(&startCounter);
+
+        return hr;
+    }
+    else
+        return Direct3DDevice8->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
 }
 
 HRESULT Direct3D8Wrapper::CreateDevice(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS *pPresentationParameters, IDirect3DDevice8 **ppReturnedDeviceInterface) {
@@ -134,11 +185,14 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)&Direct3DCreate8Callback, &hm);
         GetModuleFileNameA(hm, path, sizeof(path));
         *strrchr(path, '\\') = '\0';
-        strcat(path, "\\d3d8.ini");
+        strcat_s(path, "\\d3d8.ini");
 
         bForceWindowedMode = GetPrivateProfileInt("MAIN", "ForceWindowedMode", 0, path) != 0;
         bSetVertexShaderConstantHook = GetPrivateProfileInt("MAIN", "SetVertexShaderConstantHook", 0, path) != 0;
         bDirect3D8DisableMaximizedWindowedModeShim = GetPrivateProfileInt("MAIN", "Direct3D8DisableMaximizedWindowedModeShim", 0, path) != 0;
+        fFPSLimit = static_cast<float>(GetPrivateProfileInt("MAIN", "FPSLimit", 0, path));
+        if (fFPSLimit)
+            bFPSLimit = true;
 
         if (bDirect3D8DisableMaximizedWindowedModeShim)
         {

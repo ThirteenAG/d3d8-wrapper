@@ -277,9 +277,9 @@ HRESULT Direct3DDevice8Wrapper::SetPixelShaderConstant(DWORD Register, CONST voi
 	return Direct3DDevice8->SetPixelShaderConstant(Register, pConstantData, ConstantCount);
 }
 
-HRESULT Direct3DDevice8Wrapper::Present(CONST RECT *pSourceRect, CONST RECT *pDestRect, HWND hDestWindowOverride, CONST RGNDATA *pDirtyRegion) {
-	return Direct3DDevice8->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
-}
+//HRESULT Direct3DDevice8Wrapper::Present(CONST RECT *pSourceRect, CONST RECT *pDestRect, HWND hDestWindowOverride, CONST RGNDATA *pDirtyRegion) {
+//	return Direct3DDevice8->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
+//}
 
 HRESULT Direct3DDevice8Wrapper::Reset(D3DPRESENT_PARAMETERS *pPresentationParameters) {
 	OutputDebugString("Device reset called.");
