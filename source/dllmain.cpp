@@ -87,32 +87,41 @@ HRESULT Direct3DDevice8Wrapper::Present(CONST RECT *pSourceRect, CONST RECT *pDe
         return Direct3DDevice8->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
 }
 
+void ForceWindowed(D3DPRESENT_PARAMETERS *pPresentationParameters)
+{
+    HMONITOR monitor = MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTONEAREST);
+    MONITORINFO info;
+    info.cbSize = sizeof(MONITORINFO);
+    GetMonitorInfo(monitor, &info);
+    int DesktopResX = info.rcMonitor.right - info.rcMonitor.left;
+    int DesktopResY = info.rcMonitor.bottom - info.rcMonitor.top;
+
+    int left = (int)(((float)DesktopResX / 2.0f) - ((float)pPresentationParameters->BackBufferWidth / 2.0f));
+    int top = (int)(((float)DesktopResY / 2.0f) - ((float)pPresentationParameters->BackBufferHeight / 2.0f));
+
+    pPresentationParameters->Windowed = true;
+
+    SetWindowPos(pPresentationParameters->hDeviceWindow, HWND_NOTOPMOST, left, top, pPresentationParameters->BackBufferWidth, pPresentationParameters->BackBufferHeight, SWP_SHOWWINDOW);
+}
+
 HRESULT Direct3D8Wrapper::CreateDevice(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS *pPresentationParameters, IDirect3DDevice8 **ppReturnedDeviceInterface) {
     IDirect3DDevice8* Direct3DDevice8;
 
     if (bForceWindowedMode)
-    {
-        HMONITOR monitor = MonitorFromWindow(NULL, MONITOR_DEFAULTTONEAREST);
-        MONITORINFO info;
-        info.cbSize = sizeof(MONITORINFO);
-        GetMonitorInfo(monitor, &info);
-        int DesktopResX = info.rcMonitor.right - info.rcMonitor.left;
-        int DesktopResY = info.rcMonitor.bottom - info.rcMonitor.top;
-
-        int left = (int)(((float)DesktopResX / 2.0f) - ((float)pPresentationParameters->BackBufferWidth / 2.0f));
-        int top = (int)(((float)DesktopResY / 2.0f) - ((float)pPresentationParameters->BackBufferHeight / 2.0f));
-
-        pPresentationParameters->hDeviceWindow = hFocusWindow;
-        pPresentationParameters->Windowed = true;
-        pPresentationParameters->FullScreen_RefreshRateInHz = 0;
-        pPresentationParameters->FullScreen_PresentationInterval = 0;
-
-        SetWindowPos(pPresentationParameters->hDeviceWindow, HWND_NOTOPMOST, left, top, pPresentationParameters->BackBufferWidth, pPresentationParameters->BackBufferHeight, SWP_SHOWWINDOW);
-    }
+        ForceWindowed(pPresentationParameters);
 
     HRESULT Result = Direct3D8->CreateDevice(Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, &Direct3DDevice8);
     *ppReturnedDeviceInterface = new Direct3DDevice8Wrapper(&Direct3DDevice8, pPresentationParameters);
     return Result;
+}
+
+HRESULT Direct3DDevice8Wrapper::Reset(D3DPRESENT_PARAMETERS *pPresentationParameters) {
+    OutputDebugString("Device reset called.");
+
+    if (bForceWindowedMode)
+        ForceWindowed(pPresentationParameters);
+
+    return Direct3DDevice8->Reset(PresentationParameters);
 }
 
 HRESULT Direct3DDevice8Wrapper::SetVertexShaderConstant(DWORD Register, CONST void *pConstantData, DWORD ConstantCount) {

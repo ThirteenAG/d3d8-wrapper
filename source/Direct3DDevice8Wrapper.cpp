@@ -281,10 +281,10 @@ HRESULT Direct3DDevice8Wrapper::SetPixelShaderConstant(DWORD Register, CONST voi
 //	return Direct3DDevice8->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
 //}
 
-HRESULT Direct3DDevice8Wrapper::Reset(D3DPRESENT_PARAMETERS *pPresentationParameters) {
-	OutputDebugString("Device reset called.");
-	return Direct3DDevice8->Reset(PresentationParameters);
-}
+//HRESULT Direct3DDevice8Wrapper::Reset(D3DPRESENT_PARAMETERS *pPresentationParameters) {
+//	OutputDebugString("Device reset called.");
+//	return Direct3DDevice8->Reset(PresentationParameters);
+//}
 
 HRESULT Direct3DDevice8Wrapper::DrawIndexedPrimitive(D3DPRIMITIVETYPE Type, UINT MinIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount) {
 	return Direct3DDevice8->DrawIndexedPrimitive(Type, MinIndex, NumVertices, StartIndex, PrimitiveCount);
