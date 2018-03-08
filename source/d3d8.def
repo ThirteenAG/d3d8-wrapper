@@ -1,7 +1,8 @@
 LIBRARY "d3d8"
+
 EXPORTS
-DebugSetMute_d3d8 = _DebugSetMute_d3d8 @4
-;Direct3D8EnableMaximizedWindowedModeShim = _Direct3D8EnableMaximizedWindowedModeShim @1
-Direct3DCreate8 = _Direct3DCreate8 @5
-ValidatePixelShader = _ValidatePixelShader @2
-ValidateVertexShader = _ValidateVertexShader @3
+    DebugSetMute = _DebugSetMute @4
+    Direct3D8EnableMaximizedWindowedModeShim = _Direct3D8EnableMaximizedWindowedModeShim @1
+    Direct3DCreate8 = _Direct3DCreate8 @5
+    ValidatePixelShader = _ValidatePixelShader @2
+    ValidateVertexShader = _ValidateVertexShader @3

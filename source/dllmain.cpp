@@ -6,29 +6,27 @@
 
 //Sources used from:
 //https://bitbucket.org/andrewcooper/windower_open
-//http://www.jiri-dvorak.cz/scellpt/index.html
 
 bool bForceWindowedMode;
-bool bSetVertexShaderConstantHook;
 bool bDirect3D8DisableMaximizedWindowedModeShim;
 bool bFPSLimit;
 float fFPSLimit;
 
 struct d3d8_dll
 {
-  HMODULE dll;
-  FARPROC DebugSetMute_d3d8;
-  //FARPROC Direct3D8EnableMaximizedWindowedModeShim;
-  FARPROC Direct3DCreate8;
-  FARPROC ValidatePixelShader;
-  FARPROC ValidateVertexShader;
+    HMODULE dll;
+    FARPROC DebugSetMute;
+    FARPROC Direct3D8EnableMaximizedWindowedModeShim;
+    FARPROC Direct3DCreate8;
+    FARPROC ValidatePixelShader;
+    FARPROC ValidateVertexShader;
 } d3d8;
 
-__declspec(naked) void _DebugSetMute_d3d8() { _asm { jmp [d3d8.DebugSetMute_d3d8] } }
-//__declspec(naked) void _Direct3D8EnableMaximizedWindowedModeShim() { _asm { jmp [d3d8.Direct3D8EnableMaximizedWindowedModeShim] } }
-__declspec(naked) void _Direct3DCreate8() { _asm { jmp [d3d8.Direct3DCreate8] } }
-__declspec(naked) void _ValidatePixelShader() { _asm { jmp [d3d8.ValidatePixelShader] } }
-__declspec(naked) void _ValidateVertexShader() { _asm { jmp [d3d8.ValidateVertexShader] } }
+__declspec(naked) void _DebugSetMute() { _asm { jmp[d3d8.DebugSetMute] } }
+__declspec(naked) void _Direct3D8EnableMaximizedWindowedModeShim() { _asm { jmp[d3d8.Direct3D8EnableMaximizedWindowedModeShim] } }
+__declspec(naked) void _Direct3DCreate8() { _asm { jmp[d3d8.Direct3DCreate8] } }
+__declspec(naked) void _ValidatePixelShader() { _asm { jmp[d3d8.ValidatePixelShader] } }
+__declspec(naked) void _ValidateVertexShader() { _asm { jmp[d3d8.ValidateVertexShader] } }
 IDirect3D8*	(WINAPI *OriginalDirect3DCreate8) (UINT SDKVersion);
 
 IDirect3D8* WINAPI Direct3DCreate8Callback(UINT SDKVersion)
@@ -124,51 +122,11 @@ HRESULT Direct3DDevice8Wrapper::Reset(D3DPRESENT_PARAMETERS *pPresentationParame
     return Direct3DDevice8->Reset(PresentationParameters);
 }
 
-HRESULT Direct3DDevice8Wrapper::SetVertexShaderConstant(DWORD Register, CONST void *pConstantData, DWORD ConstantCount) {
-
-    const float *const ConstValues = static_cast<const float *>(pConstantData);
-
-    // It must look like matrix. Note that different games might upload
-    // constants as a bigger block in which case this will not process
-    // the matrix and game-specific knowledge (or analysis of the shader)
-    // needs to be applied.
-
-    if (ConstantCount != 4 || !bSetVertexShaderConstantHook) {
-        return Direct3DDevice8->SetVertexShaderConstant(Register, pConstantData, ConstantCount);
-    }
-
-    // For use with SC assume 24bit shadow textures.
-
-    const unsigned texture_bit_depth = (1 << 24) - 1;
-
-    // In DirectX8 interfaces the Z component was supposed to be provided
-    // as prescaled by (2^bitdepth - 1). Check if the corresponding part
-    // of matrix looks prescaled.
-
-    if (fabs(ConstValues[11]) < 300000) {
-        return Direct3DDevice8->SetVertexShaderConstant(Register, pConstantData, ConstantCount);
-    }
-
-    // The DirectX9 interfaces expects it in its native <0;1> range. It
-    // seems that starting from some driver version the new behavior
-    // applies also to the old version of the interface. Revert the scale.
-
-    float compensated_matrix[4 * 4];
-    memcpy(compensated_matrix, pConstantData, sizeof(compensated_matrix));
-
-    const float compensation_factor = 1.0f / texture_bit_depth;
-    for (unsigned i = 0; i < 4; ++i) {
-        compensated_matrix[8 + i] *= compensation_factor;
-    }
-
-    return Direct3DDevice8->SetVertexShaderConstant(Register, compensated_matrix, ConstantCount);
-}
-
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
-  char path[MAX_PATH];
-  switch (ul_reason_for_call)
-  {
+    char path[MAX_PATH];
+    switch (ul_reason_for_call)
+    {
     case DLL_PROCESS_ATTACH:
     {
         CopyMemory(path + GetSystemDirectory(path, MAX_PATH - 9), "\\d3d8.dll", 10);
@@ -178,8 +136,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             ExitProcess(0);
         }
 
-        d3d8.DebugSetMute_d3d8 = GetProcAddress(d3d8.dll, "DebugSetMute");
-        //d3d8.Direct3D8EnableMaximizedWindowedModeShim = GetProcAddress(d3d8.dll, "Direct3D8EnableMaximizedWindowedModeShim");
+        d3d8.DebugSetMute = GetProcAddress(d3d8.dll, "DebugSetMute");
+        d3d8.Direct3D8EnableMaximizedWindowedModeShim = GetProcAddress(d3d8.dll, "Direct3D8EnableMaximizedWindowedModeShim");
         d3d8.Direct3DCreate8 = GetProcAddress(d3d8.dll, "Direct3DCreate8");
         d3d8.ValidatePixelShader = GetProcAddress(d3d8.dll, "ValidatePixelShader");
         d3d8.ValidateVertexShader = GetProcAddress(d3d8.dll, "ValidateVertexShader");
@@ -197,7 +155,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         strcat_s(path, "\\d3d8.ini");
 
         bForceWindowedMode = GetPrivateProfileInt("MAIN", "ForceWindowedMode", 0, path) != 0;
-        bSetVertexShaderConstantHook = GetPrivateProfileInt("MAIN", "SetVertexShaderConstantHook", 0, path) != 0;
         bDirect3D8DisableMaximizedWindowedModeShim = GetPrivateProfileInt("MAIN", "Direct3D8DisableMaximizedWindowedModeShim", 0, path) != 0;
         fFPSLimit = static_cast<float>(GetPrivateProfileInt("MAIN", "FPSLimit", 0, path));
         if (fFPSLimit)
@@ -220,8 +177,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     break;
 
     case DLL_PROCESS_DETACH:
-      FreeLibrary(d3d8.dll);
-    break;
-  }
-  return TRUE;
+        FreeLibrary(d3d8.dll);
+        break;
+    }
+    return TRUE;
 }
