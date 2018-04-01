@@ -18,11 +18,19 @@ ULONG Direct3DDevice8Wrapper::AddRef() {
 }
 
 HRESULT Direct3DDevice8Wrapper::QueryInterface(REFIID riid, LPVOID *ppvObj) {
-    return Direct3DDevice8->QueryInterface(riid, ppvObj);
+    *ppvObj = NULL;
+    HRESULT hr = Direct3DDevice8->QueryInterface(riid, ppvObj);
+    if (hr == D3D_OK)
+        *ppvObj = this;
+    return hr;
 }
 
 ULONG Direct3DDevice8Wrapper::Release() {
-    return Direct3DDevice8->Release();
+    ULONG count = Direct3DDevice8->Release();
+    if (count == 0) {
+        delete(this);
+    }
+    return (count);
 }
 
 void Direct3DDevice8Wrapper::SetCursorPosition(int XScreenSpace, int YScreenSpace, DWORD Flags) {
