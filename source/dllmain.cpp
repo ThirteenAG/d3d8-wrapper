@@ -90,10 +90,9 @@ HRESULT Direct3DDevice8Wrapper::Present(CONST RECT *pSourceRect, CONST RECT *pDe
 
             SleepEx(0, 1);
         }
-        auto hr = Direct3DDevice8->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
         QueryPerformanceCounter(&PerformanceCount2);
         PerformanceCount1.QuadPart = PerformanceCount2.QuadPart >> i;
-        return hr;
+        return Direct3DDevice8->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
     }
     else
         return Direct3DDevice8->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
