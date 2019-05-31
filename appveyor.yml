@@ -1,8 +1,16 @@
-version: 1.0.{build}
+version: 1.{build}
 skip_tags: true
 image: Visual Studio 2019
+install:
+- cmd: premake5.bat
 build:
+  project: build/d3d8-wrapper.sln
   verbosity: minimal
+after_build:
+- cmd: 7z a d3d8.zip %APPVEYOR_BUILD_FOLDER%\data\d3d8.dll %APPVEYOR_BUILD_FOLDER%\data\d3d8.ini
+artifacts:
+- path: d3d8.zip
+  name: d3d8
 deploy:
 - provider: GitHub
   release: d3d8-wrapper v$(appveyor_build_version)
