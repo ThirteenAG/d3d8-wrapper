@@ -1,197 +1,233 @@
-#include <windows.h>
-#include <d3d8.h>
-#include <math.h>
-#include "Direct3D8Wrapper.h"
-#include "Direct3DDevice8Wrapper.h"
+/**
+* Copyright (C) 2020 Elisha Riedlinger
+*
+* This software is  provided 'as-is', without any express  or implied  warranty. In no event will the
+* authors be held liable for any damages arising from the use of this software.
+* Permission  is granted  to anyone  to use  this software  for  any  purpose,  including  commercial
+* applications, and to alter it and redistribute it freely, subject to the following restrictions:
+*
+*   1. The origin of this software must not be misrepresented; you must not claim that you  wrote the
+*      original  software. If you use this  software  in a product, an  acknowledgment in the product
+*      documentation would be appreciated but is not required.
+*   2. Altered source versions must  be plainly  marked as such, and  must not be  misrepresented  as
+*      being the original software.
+*   3. This notice may not be removed or altered from any source distribution.
+*/
 
-//Sources used from:
-//https://bitbucket.org/andrewcooper/windower_open
+#include "d3d8.h"
+
+Direct3D8EnableMaximizedWindowedModeShimProc m_pDirect3D8EnableMaximizedWindowedModeShim;
+ValidatePixelShaderProc m_pValidatePixelShader;
+ValidateVertexShaderProc m_pValidateVertexShader;
+DebugSetMuteProc m_pDebugSetMute;
+Direct3DCreate8Proc m_pDirect3DCreate8;
 
 bool bForceWindowedMode;
 bool bDirect3D8DisableMaximizedWindowedModeShim;
 bool bFPSLimit;
 float fFPSLimit;
 
-struct d3d8_dll
+class FrameLimiter
 {
-    HMODULE dll;
-    FARPROC DebugSetMute;
-    FARPROC Direct3D8EnableMaximizedWindowedModeShim;
-    FARPROC Direct3DCreate8;
-    FARPROC ValidatePixelShader;
-    FARPROC ValidateVertexShader;
-} d3d8;
+private:
+	static inline double TIME_Frequency = 0.0;
+	static inline double TIME_Ticks = 0.0;
 
-__declspec(naked) void _DebugSetMute() { _asm { jmp[d3d8.DebugSetMute] } }
-__declspec(naked) void _Direct3D8EnableMaximizedWindowedModeShim() { _asm { jmp[d3d8.Direct3D8EnableMaximizedWindowedModeShim] } }
-__declspec(naked) void _Direct3DCreate8() { _asm { jmp[d3d8.Direct3DCreate8] } }
-__declspec(naked) void _ValidatePixelShader() { _asm { jmp[d3d8.ValidatePixelShader] } }
-__declspec(naked) void _ValidateVertexShader() { _asm { jmp[d3d8.ValidateVertexShader] } }
-IDirect3D8*	(WINAPI *OriginalDirect3DCreate8) (UINT SDKVersion);
+public:
+	static void Init()
+	{
+		LARGE_INTEGER frequency;
 
-IDirect3D8* WINAPI Direct3DCreate8Callback(UINT SDKVersion)
+		QueryPerformanceFrequency(&frequency);
+		static constexpr auto TICKS_PER_FRAME = 1;
+		auto TICKS_PER_SECOND = (TICKS_PER_FRAME * fFPSLimit);
+		TIME_Frequency = (double)frequency.QuadPart / (double)TICKS_PER_SECOND;
+		Ticks();
+	}
+	static DWORD Sync()
+	{
+		DWORD lastTicks, currentTicks;
+		LARGE_INTEGER counter;
+
+		QueryPerformanceCounter(&counter);
+		lastTicks = (DWORD)TIME_Ticks;
+		TIME_Ticks = (double)counter.QuadPart / TIME_Frequency;
+		currentTicks = (DWORD)TIME_Ticks;
+
+		return (currentTicks > lastTicks) ? currentTicks - lastTicks : 0;
+	}
+
+private:
+	static void Ticks()
+	{
+		LARGE_INTEGER counter;
+		QueryPerformanceCounter(&counter);
+		TIME_Ticks = (double)counter.QuadPart / TIME_Frequency;
+	}
+};
+
+HRESULT m_IDirect3DDevice8::Present(CONST RECT* pSourceRect, CONST RECT* pDestRect, HWND hDestWindowOverride, CONST RGNDATA* pDirtyRegion)
 {
-    IDirect3D8* Direct3D = OriginalDirect3DCreate8(SDKVersion);
-    IDirect3D8* WrappedDirect3D = new Direct3D8Wrapper(Direct3D);
-    return WrappedDirect3D;
+	if (bFPSLimit)
+		while (!FrameLimiter::Sync());
+
+	return ProxyInterface->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
 }
 
-HRESULT Direct3DDevice8Wrapper::Present(CONST RECT *pSourceRect, CONST RECT *pDestRect, HWND hDestWindowOverride, CONST RGNDATA *pDirtyRegion)
+void ForceWindowed(D3DPRESENT_PARAMETERS* pPresentationParameters)
 {
-    if (bFPSLimit)
-    {
-        static LARGE_INTEGER PerformanceCount1;
-        static LARGE_INTEGER PerformanceCount2;
-        static bool bOnce1 = false;
-        static double targetFrameTime = 1000.0 / fFPSLimit;
-        static double t = 0.0;
-        static DWORD i = 0;
+	HMONITOR monitor = MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTONEAREST);
+	MONITORINFO info;
+	info.cbSize = sizeof(MONITORINFO);
+	GetMonitorInfo(monitor, &info);
+	int DesktopResX = info.rcMonitor.right - info.rcMonitor.left;
+	int DesktopResY = info.rcMonitor.bottom - info.rcMonitor.top;
 
-        if (!bOnce1)
-        {
-            bOnce1 = true;
-            QueryPerformanceCounter(&PerformanceCount1);
-            PerformanceCount1.QuadPart = PerformanceCount1.QuadPart >> i;
-        }
+	int left = (int)(((float)DesktopResX / 2.0f) - ((float)pPresentationParameters->BackBufferWidth / 2.0f));
+	int top = (int)(((float)DesktopResY / 2.0f) - ((float)pPresentationParameters->BackBufferHeight / 2.0f));
 
-        while (true)
-        {
-            QueryPerformanceCounter(&PerformanceCount2);
-            if (t == 0.0)
-            {
-                LARGE_INTEGER PerformanceCount3;
-                static bool bOnce2 = false;
+	pPresentationParameters->Windowed = true;
 
-                if (!bOnce2)
-                {
-                    bOnce2 = true;
-                    QueryPerformanceFrequency(&PerformanceCount3);
-                    i = 0;
-                    t = 1000.0 / (double)PerformanceCount3.QuadPart;
-                    auto v = t * 2147483648.0;
-                    if (60000.0 > v)
-                    {
-                        while (true)
-                        {
-                            ++i;
-                            v *= 2.0;
-                            t *= 2.0;
-                            if (60000.0 <= v)
-                                break;
-                        }
-                    }
-                }
-                SleepEx(0, 1);
-                break;
-            }
-
-            if (((double)((PerformanceCount2.QuadPart >> i) - PerformanceCount1.QuadPart) * t) >= targetFrameTime)
-                break;
-
-            SleepEx(0, 1);
-        }
-        QueryPerformanceCounter(&PerformanceCount2);
-        PerformanceCount1.QuadPart = PerformanceCount2.QuadPart >> i;
-        return Direct3DDevice8->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
-    }
-    else
-        return Direct3DDevice8->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
+	SetWindowPos(pPresentationParameters->hDeviceWindow, HWND_NOTOPMOST, left, top, pPresentationParameters->BackBufferWidth, pPresentationParameters->BackBufferHeight, SWP_SHOWWINDOW);
 }
 
-void ForceWindowed(D3DPRESENT_PARAMETERS *pPresentationParameters)
+HRESULT m_IDirect3D8::CreateDevice(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, IDirect3DDevice8** ppReturnedDeviceInterface)
 {
-    HMONITOR monitor = MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTONEAREST);
-    MONITORINFO info;
-    info.cbSize = sizeof(MONITORINFO);
-    GetMonitorInfo(monitor, &info);
-    int DesktopResX = info.rcMonitor.right - info.rcMonitor.left;
-    int DesktopResY = info.rcMonitor.bottom - info.rcMonitor.top;
+	if (bForceWindowedMode)
+		ForceWindowed(pPresentationParameters);
 
-    int left = (int)(((float)DesktopResX / 2.0f) - ((float)pPresentationParameters->BackBufferWidth / 2.0f));
-    int top = (int)(((float)DesktopResY / 2.0f) - ((float)pPresentationParameters->BackBufferHeight / 2.0f));
+	HRESULT hr = ProxyInterface->CreateDevice(Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, ppReturnedDeviceInterface);
 
-    pPresentationParameters->Windowed = true;
-
-    SetWindowPos(pPresentationParameters->hDeviceWindow, HWND_NOTOPMOST, left, top, pPresentationParameters->BackBufferWidth, pPresentationParameters->BackBufferHeight, SWP_SHOWWINDOW);
+	if (SUCCEEDED(hr) && ppReturnedDeviceInterface)
+	{
+		*ppReturnedDeviceInterface = new m_IDirect3DDevice8(*ppReturnedDeviceInterface, this);
+	}
+	return hr;
 }
 
-HRESULT Direct3D8Wrapper::CreateDevice(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS *pPresentationParameters, IDirect3DDevice8 **ppReturnedDeviceInterface) {
-    IDirect3DDevice8* Direct3DDevice8;
-
-    if (bForceWindowedMode)
-        ForceWindowed(pPresentationParameters);
-
-    HRESULT Result = Direct3D8->CreateDevice(Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, &Direct3DDevice8);
-    *ppReturnedDeviceInterface = new Direct3DDevice8Wrapper(&Direct3DDevice8, pPresentationParameters);
-    return Result;
-}
-
-HRESULT Direct3DDevice8Wrapper::Reset(D3DPRESENT_PARAMETERS *pPresentationParameters) {
-    OutputDebugString("Device reset called.");
-
-    if (bForceWindowedMode)
-        ForceWindowed(pPresentationParameters);
-
-    return Direct3DDevice8->Reset(PresentationParameters);
-}
-
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
+HRESULT m_IDirect3DDevice8::Reset(D3DPRESENT_PARAMETERS* pPresentationParameters)
 {
-    char path[MAX_PATH];
-    switch (ul_reason_for_call)
-    {
-    case DLL_PROCESS_ATTACH:
-    {
-        CopyMemory(path + GetSystemDirectory(path, MAX_PATH - 9), "\\d3d8.dll", 10);
-        d3d8.dll = LoadLibrary(path);
-        if (d3d8.dll == false)
-        {
-            ExitProcess(0);
-        }
+	if (bForceWindowedMode)
+		ForceWindowed(pPresentationParameters);
 
-        d3d8.DebugSetMute = GetProcAddress(d3d8.dll, "DebugSetMute");
-        d3d8.Direct3D8EnableMaximizedWindowedModeShim = GetProcAddress(d3d8.dll, "Direct3D8EnableMaximizedWindowedModeShim");
-        d3d8.Direct3DCreate8 = GetProcAddress(d3d8.dll, "Direct3DCreate8");
-        d3d8.ValidatePixelShader = GetProcAddress(d3d8.dll, "ValidatePixelShader");
-        d3d8.ValidateVertexShader = GetProcAddress(d3d8.dll, "ValidateVertexShader");
+	return ProxyInterface->Reset(pPresentationParameters);
+}
 
-        //wrapping Direct3DCreate8
-        OriginalDirect3DCreate8 = (IDirect3D8 *(__stdcall *)(UINT))GetProcAddress(d3d8.dll, "Direct3DCreate8");
-        d3d8.Direct3DCreate8 = (FARPROC)Direct3DCreate8Callback;
+bool WINAPI DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
+{
+	static HMODULE d3d8dll = nullptr;
 
-        //ini
-        char path[MAX_PATH];
-        HMODULE hm = NULL;
-        GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)&Direct3DCreate8Callback, &hm);
-        GetModuleFileNameA(hm, path, sizeof(path));
-        *strrchr(path, '\\') = '\0';
-        strcat_s(path, "\\d3d8.ini");
+	switch (dwReason)
+	{
+		case DLL_PROCESS_ATTACH:
+		{
+			// Load dll
+			char path[MAX_PATH];
+			GetSystemDirectoryA(path, MAX_PATH);
+			strcat_s(path, "\\d3d8.dll");
+			d3d8dll = LoadLibraryA(path);
 
-        bForceWindowedMode = GetPrivateProfileInt("MAIN", "ForceWindowedMode", 0, path) != 0;
-        bDirect3D8DisableMaximizedWindowedModeShim = GetPrivateProfileInt("MAIN", "Direct3D8DisableMaximizedWindowedModeShim", 0, path) != 0;
-        fFPSLimit = static_cast<float>(GetPrivateProfileInt("MAIN", "FPSLimit", 0, path));
-        if (fFPSLimit)
-            bFPSLimit = true;
+			// Get function addresses
+			m_pDirect3D8EnableMaximizedWindowedModeShim = (Direct3D8EnableMaximizedWindowedModeShimProc)GetProcAddress(d3d8dll, "Direct3D8EnableMaximizedWindowedModeShim");
+			m_pValidatePixelShader = (ValidatePixelShaderProc)GetProcAddress(d3d8dll, "ValidatePixelShader");
+			m_pValidateVertexShader = (ValidateVertexShaderProc)GetProcAddress(d3d8dll, "ValidateVertexShader");
+			m_pDebugSetMute = (DebugSetMuteProc)GetProcAddress(d3d8dll, "DebugSetMute");
+			m_pDirect3DCreate8 = (Direct3DCreate8Proc)GetProcAddress(d3d8dll, "Direct3DCreate8");
 
-        if (bDirect3D8DisableMaximizedWindowedModeShim)
-        {
-            auto addr = (uintptr_t)GetProcAddress(d3d8.dll, "Direct3D8EnableMaximizedWindowedModeShim");
-            if (addr)
-            {
-                DWORD Protect;
-                VirtualProtect((LPVOID)(addr + 6), 4, PAGE_EXECUTE_READWRITE, &Protect);
-                *(unsigned*)(addr + 6) = 0;
-                *(unsigned*)(*(unsigned*)(addr + 2)) = 0;
-                VirtualProtect((LPVOID)(addr + 6), 4, Protect, &Protect);
-                bForceWindowedMode = 0;
-            }
-        }
-    }
-    break;
+			//ini
+			HMODULE hm = NULL;
+			GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)&Direct3DCreate8, &hm);
+			GetModuleFileNameA(hm, path, sizeof(path));
+			*strrchr(path, '\\') = '\0';
+			strcat_s(path, "\\d3d8.ini");
 
-    case DLL_PROCESS_DETACH:
-        FreeLibrary(d3d8.dll);
-        break;
-    }
-    return TRUE;
+			bForceWindowedMode = GetPrivateProfileInt("MAIN", "ForceWindowedMode", 0, path) != 0;
+			bDirect3D8DisableMaximizedWindowedModeShim = GetPrivateProfileInt("MAIN", "Direct3D8DisableMaximizedWindowedModeShim", 0, path) != 0;
+			fFPSLimit = static_cast<float>(GetPrivateProfileInt("MAIN", "FPSLimit", 0, path));
+			if (fFPSLimit > 0.0f)
+			{
+				FrameLimiter::Init();
+				bFPSLimit = true;
+			}
+
+			if (bDirect3D8DisableMaximizedWindowedModeShim)
+			{
+				auto addr = (uintptr_t)GetProcAddress(d3d8dll, "Direct3D8EnableMaximizedWindowedModeShim");
+				if (addr)
+				{
+					DWORD Protect;
+					VirtualProtect((LPVOID)(addr + 6), 4, PAGE_EXECUTE_READWRITE, &Protect);
+					*(unsigned*)(addr + 6) = 0;
+					*(unsigned*)(*(unsigned*)(addr + 2)) = 0;
+					VirtualProtect((LPVOID)(addr + 6), 4, Protect, &Protect);
+					bForceWindowedMode = 0;
+				}
+			}
+		}
+		break;
+		case DLL_PROCESS_DETACH:
+		{
+			FreeLibrary(d3d8dll);
+		}
+		break;
+	}
+
+	return true;
+}
+
+int WINAPI Direct3D8EnableMaximizedWindowedModeShim(BOOL mEnable)
+{
+	if (!m_pDirect3D8EnableMaximizedWindowedModeShim)
+	{
+		return E_FAIL;
+	}
+
+	return m_pDirect3D8EnableMaximizedWindowedModeShim(mEnable);
+}
+
+HRESULT WINAPI ValidatePixelShader(DWORD* pixelshader, DWORD* reserved1, BOOL flag, DWORD* toto)
+{
+	if (!m_pValidatePixelShader)
+	{
+		return E_FAIL;
+	}
+
+	return m_pValidatePixelShader(pixelshader, reserved1, flag, toto);
+}
+
+HRESULT WINAPI ValidateVertexShader(DWORD* vertexshader, DWORD* reserved1, DWORD* reserved2, BOOL flag, DWORD* toto)
+{
+	if (!m_pValidateVertexShader)
+	{
+		return E_FAIL;
+	}
+
+	return m_pValidateVertexShader(vertexshader, reserved1, reserved2, flag, toto);
+}
+
+void WINAPI DebugSetMute()
+{
+	if (!m_pDebugSetMute)
+	{
+		return;
+	}
+
+	return m_pDebugSetMute();
+}
+
+IDirect3D8 *WINAPI Direct3DCreate8(UINT SDKVersion)
+{
+	if (!m_pDirect3DCreate8)
+	{
+		return nullptr;
+	}
+
+	IDirect3D8 *pD3D8 = m_pDirect3DCreate8(SDKVersion);
+
+	if (pD3D8)
+	{
+		return new m_IDirect3D8(pD3D8);
+	}
+
+	return nullptr;
 }
