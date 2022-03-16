@@ -16,6 +16,8 @@
 
 #include "d3d8.h"
 
+#pragma comment(lib, "winmm.lib") // needed for timeBeginPeriod()/timeEndPeriod()
+
 Direct3D8EnableMaximizedWindowedModeShimProc m_pDirect3D8EnableMaximizedWindowedModeShim;
 ValidatePixelShaderProc m_pValidatePixelShader;
 ValidateVertexShaderProc m_pValidateVertexShader;
@@ -26,7 +28,6 @@ HWND g_hFocusWindow = NULL;
 
 bool bForceWindowedMode;
 bool bDirect3D8DisableMaximizedWindowedModeShim;
-bool bFPSLimit;
 bool bUsePrimaryMonitor;
 bool bCenterWindow;
 bool bBorderlessFullscreen;
@@ -38,19 +39,29 @@ class FrameLimiter
 private:
 	static inline double TIME_Frequency = 0.0;
 	static inline double TIME_Ticks = 0.0;
+	static inline double TIME_Frametime = 0.0;
 
 public:
-	static void Init()
+	enum FPSLimitMode { FPS_NONE, FPS_REALTIME, FPS_ACCURATE };
+	static void Init(FPSLimitMode mode)
 	{
 		LARGE_INTEGER frequency;
 
 		QueryPerformanceFrequency(&frequency);
 		static constexpr auto TICKS_PER_FRAME = 1;
 		auto TICKS_PER_SECOND = (TICKS_PER_FRAME * fFPSLimit);
-		TIME_Frequency = (double)frequency.QuadPart / (double)TICKS_PER_SECOND;
+		if (mode == FPS_ACCURATE)
+		{
+			TIME_Frametime = 1000.0 / (double)fFPSLimit;
+			TIME_Frequency = (double)frequency.QuadPart / 1000.0; // ticks are milliseconds
+		}
+		else // FPS_REALTIME
+		{
+			TIME_Frequency = (double)frequency.QuadPart / (double)TICKS_PER_SECOND; // ticks are 1/n frames (n = fFPSLimit)
+		}
 		Ticks();
 	}
-	static DWORD Sync()
+	static DWORD Sync_RT()
 	{
 		DWORD lastTicks, currentTicks;
 		LARGE_INTEGER counter;
@@ -62,6 +73,24 @@ public:
 
 		return (currentTicks > lastTicks) ? currentTicks - lastTicks : 0;
 	}
+	static DWORD Sync_SLP()
+	{
+		LARGE_INTEGER counter;
+		QueryPerformanceCounter(&counter);
+		double millis_current = (double)counter.QuadPart / TIME_Frequency;
+		double millis_delta = millis_current - TIME_Ticks;
+		if (TIME_Frametime <= millis_delta)
+		{
+			TIME_Ticks = millis_current;
+			return 1;
+		}
+		else if (TIME_Frametime - millis_delta > 2.0) // > 2ms
+			Sleep(1); // Sleep for ~1ms
+		else
+			Sleep(0); // yield thread's time-slice (does not actually sleep)
+
+		return 0;
+	}
 
 private:
 	static void Ticks()
@@ -72,10 +101,14 @@ private:
 	}
 };
 
+FrameLimiter::FPSLimitMode mFPSLimitMode = FrameLimiter::FPSLimitMode::FPS_NONE;
+
 HRESULT m_IDirect3DDevice8::Present(CONST RECT* pSourceRect, CONST RECT* pDestRect, HWND hDestWindowOverride, CONST RGNDATA* pDirtyRegion)
 {
-	if (bFPSLimit)
-		while (!FrameLimiter::Sync());
+	if (mFPSLimitMode == FrameLimiter::FPSLimitMode::FPS_REALTIME)
+		while (!FrameLimiter::Sync_RT());
+	else if (mFPSLimitMode == FrameLimiter::FPSLimitMode::FPS_ACCURATE)
+		while (!FrameLimiter::Sync_SLP());
 
 	return ProxyInterface->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
 }
@@ -199,11 +232,17 @@ bool WINAPI DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
 			bCenterWindow = GetPrivateProfileInt("FORCEWINDOWED", "CenterWindow", 1, path) != 0;
 			bBorderlessFullscreen = GetPrivateProfileInt("FORCEWINDOWED", "BorderlessFullscreen", 0, path) != 0;
 			bAlwaysOnTop = GetPrivateProfileInt("FORCEWINDOWED", "AlwaysOnTop", 0, path) != 0;
+
 			if (fFPSLimit > 0.0f)
 			{
-				FrameLimiter::Init();
-				bFPSLimit = true;
+				mFPSLimitMode = (GetPrivateProfileInt("MAIN", "FPSLimitMode", 1, path) == 2) ? FrameLimiter::FPSLimitMode::FPS_ACCURATE : FrameLimiter::FPSLimitMode::FPS_REALTIME;
+				if (mFPSLimitMode == FrameLimiter::FPSLimitMode::FPS_ACCURATE)
+					timeBeginPeriod(1);
+
+				FrameLimiter::Init(mFPSLimitMode);
 			}
+			else
+				mFPSLimitMode = FrameLimiter::FPSLimitMode::FPS_NONE;
 
 			if (bDirect3D8DisableMaximizedWindowedModeShim)
 			{
@@ -222,6 +261,9 @@ bool WINAPI DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
 		break;
 		case DLL_PROCESS_DETACH:
 		{
+			if (mFPSLimitMode == FrameLimiter::FPSLimitMode::FPS_ACCURATE)
+				timeEndPeriod(1);
+
 			FreeLibrary(d3d8dll);
 		}
 		break;
