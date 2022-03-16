@@ -86,7 +86,11 @@ void ForceWindowed(D3DPRESENT_PARAMETERS* pPresentationParameters)
 	int left = (int)(((float)DesktopResX / 2.0f) - ((float)pPresentationParameters->BackBufferWidth / 2.0f));
 	int top = (int)(((float)DesktopResY / 2.0f) - ((float)pPresentationParameters->BackBufferHeight / 2.0f));
 
-	pPresentationParameters->Windowed = true;
+	pPresentationParameters->Windowed = 1;
+
+	// These must be set to default (0) on windowed mode as per spec to prevent app freezing
+	pPresentationParameters->FullScreen_RefreshRateInHz = D3DPRESENT_RATE_DEFAULT;
+	pPresentationParameters->FullScreen_PresentationInterval = D3DPRESENT_INTERVAL_DEFAULT;
 
 	SetWindowPos(pPresentationParameters->hDeviceWindow, HWND_NOTOPMOST, left, top, pPresentationParameters->BackBufferWidth, pPresentationParameters->BackBufferHeight, SWP_SHOWWINDOW);
 }
@@ -160,7 +164,7 @@ bool WINAPI DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
 					*(unsigned*)(addr + 6) = 0;
 					*(unsigned*)(*(unsigned*)(addr + 2)) = 0;
 					VirtualProtect((LPVOID)(addr + 6), 4, Protect, &Protect);
-					bForceWindowedMode = 0;
+					bForceWindowedMode = false;
 				}
 			}
 		}
