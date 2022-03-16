@@ -22,9 +22,15 @@ ValidateVertexShaderProc m_pValidateVertexShader;
 DebugSetMuteProc m_pDebugSetMute;
 Direct3DCreate8Proc m_pDirect3DCreate8;
 
+HWND g_hFocusWindow = NULL;
+
 bool bForceWindowedMode;
 bool bDirect3D8DisableMaximizedWindowedModeShim;
 bool bFPSLimit;
+bool bUsePrimaryMonitor;
+bool bCenterWindow;
+bool bBorderlessFullscreen;
+bool bAlwaysOnTop;
 float fFPSLimit;
 
 class FrameLimiter
@@ -76,15 +82,22 @@ HRESULT m_IDirect3DDevice8::Present(CONST RECT* pSourceRect, CONST RECT* pDestRe
 
 void ForceWindowed(D3DPRESENT_PARAMETERS* pPresentationParameters)
 {
-	HMONITOR monitor = MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTONEAREST);
+	HWND hwnd = pPresentationParameters->hDeviceWindow ? pPresentationParameters->hDeviceWindow : g_hFocusWindow;
+	HMONITOR monitor = MonitorFromWindow((!bUsePrimaryMonitor && hwnd) ? hwnd : GetDesktopWindow(), MONITOR_DEFAULTTONEAREST);
 	MONITORINFO info;
 	info.cbSize = sizeof(MONITORINFO);
 	GetMonitorInfo(monitor, &info);
 	int DesktopResX = info.rcMonitor.right - info.rcMonitor.left;
 	int DesktopResY = info.rcMonitor.bottom - info.rcMonitor.top;
 
-	int left = (int)(((float)DesktopResX / 2.0f) - ((float)pPresentationParameters->BackBufferWidth / 2.0f));
-	int top = (int)(((float)DesktopResY / 2.0f) - ((float)pPresentationParameters->BackBufferHeight / 2.0f));
+	int left = (int)info.rcMonitor.left;
+	int top = (int)info.rcMonitor.top;
+
+	if (!bBorderlessFullscreen)
+	{
+		left += (int)(((float)DesktopResX / 2.0f) - ((float)pPresentationParameters->BackBufferWidth / 2.0f));
+		top += (int)(((float)DesktopResY / 2.0f) - ((float)pPresentationParameters->BackBufferHeight / 2.0f));
+	}
 
 	pPresentationParameters->Windowed = 1;
 
@@ -92,13 +105,47 @@ void ForceWindowed(D3DPRESENT_PARAMETERS* pPresentationParameters)
 	pPresentationParameters->FullScreen_RefreshRateInHz = D3DPRESENT_RATE_DEFAULT;
 	pPresentationParameters->FullScreen_PresentationInterval = D3DPRESENT_INTERVAL_DEFAULT;
 
-	SetWindowPos(pPresentationParameters->hDeviceWindow, HWND_NOTOPMOST, left, top, pPresentationParameters->BackBufferWidth, pPresentationParameters->BackBufferHeight, SWP_SHOWWINDOW);
+	if (hwnd != NULL)
+	{
+		UINT uFlags = SWP_SHOWWINDOW;
+		if (bBorderlessFullscreen)
+		{
+			LONG lOldStyle = GetWindowLong(hwnd, GWL_STYLE);
+			LONG lOldExStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+			LONG lNewStyle = lOldStyle & ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZE | WS_MAXIMIZE | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_DLGFRAME);
+			lNewStyle |= (lOldStyle & WS_CHILD) ? 0 : WS_POPUP;
+			LONG lNewExStyle = lOldExStyle & ~(WS_EX_CONTEXTHELP | WS_EX_DLGMODALFRAME | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE | WS_EX_WINDOWEDGE | WS_EX_TOOLWINDOW);
+			lNewExStyle |= WS_EX_APPWINDOW;
+
+			if (lNewStyle != lOldStyle)
+			{
+				SetWindowLong(hwnd, GWL_STYLE, lNewStyle);
+				uFlags |= SWP_FRAMECHANGED;
+			}
+			if (lNewExStyle != lOldExStyle)
+			{
+				SetWindowLong(hwnd, GWL_EXSTYLE, lNewExStyle);
+				uFlags |= SWP_FRAMECHANGED;
+			}
+			SetWindowPos(hwnd, bAlwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST, left, top, DesktopResX, DesktopResY, uFlags);
+		}
+		else
+		{
+			if (!bCenterWindow)
+				uFlags |= SWP_NOMOVE;
+
+			SetWindowPos(hwnd, bAlwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST, left, top, pPresentationParameters->BackBufferWidth, pPresentationParameters->BackBufferHeight, uFlags);
+		}
+	}
 }
 
 HRESULT m_IDirect3D8::CreateDevice(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, IDirect3DDevice8** ppReturnedDeviceInterface)
 {
 	if (bForceWindowedMode)
+	{
+		g_hFocusWindow = hFocusWindow;
 		ForceWindowed(pPresentationParameters);
+	}
 
 	HRESULT hr = ProxyInterface->CreateDevice(Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, ppReturnedDeviceInterface);
 
@@ -148,6 +195,10 @@ bool WINAPI DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
 			bForceWindowedMode = GetPrivateProfileInt("MAIN", "ForceWindowedMode", 0, path) != 0;
 			bDirect3D8DisableMaximizedWindowedModeShim = GetPrivateProfileInt("MAIN", "Direct3D8DisableMaximizedWindowedModeShim", 0, path) != 0;
 			fFPSLimit = static_cast<float>(GetPrivateProfileInt("MAIN", "FPSLimit", 0, path));
+			bUsePrimaryMonitor = GetPrivateProfileInt("FORCEWINDOWED", "UsePrimaryMonitor", 0, path) != 0;
+			bCenterWindow = GetPrivateProfileInt("FORCEWINDOWED", "CenterWindow", 1, path) != 0;
+			bBorderlessFullscreen = GetPrivateProfileInt("FORCEWINDOWED", "BorderlessFullscreen", 0, path) != 0;
+			bAlwaysOnTop = GetPrivateProfileInt("FORCEWINDOWED", "AlwaysOnTop", 0, path) != 0;
 			if (fFPSLimit > 0.0f)
 			{
 				FrameLimiter::Init();
