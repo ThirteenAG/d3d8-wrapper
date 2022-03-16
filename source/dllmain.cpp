@@ -76,15 +76,15 @@ HRESULT m_IDirect3DDevice8::Present(CONST RECT* pSourceRect, CONST RECT* pDestRe
 
 void ForceWindowed(D3DPRESENT_PARAMETERS* pPresentationParameters)
 {
-	HMONITOR monitor = MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTONEAREST);
+	HMONITOR monitor = MonitorFromWindow(pPresentationParameters->hDeviceWindow ? pPresentationParameters->hDeviceWindow : GetDesktopWindow(), MONITOR_DEFAULTTONEAREST);
 	MONITORINFO info;
 	info.cbSize = sizeof(MONITORINFO);
 	GetMonitorInfo(monitor, &info);
 	int DesktopResX = info.rcMonitor.right - info.rcMonitor.left;
 	int DesktopResY = info.rcMonitor.bottom - info.rcMonitor.top;
 
-	int left = (int)(((float)DesktopResX / 2.0f) - ((float)pPresentationParameters->BackBufferWidth / 2.0f));
-	int top = (int)(((float)DesktopResY / 2.0f) - ((float)pPresentationParameters->BackBufferHeight / 2.0f));
+	int left = (int)info.rcMonitor.left + (int)(((float)DesktopResX / 2.0f) - ((float)pPresentationParameters->BackBufferWidth / 2.0f));
+	int top = (int)info.rcMonitor.top + (int)(((float)DesktopResY / 2.0f) - ((float)pPresentationParameters->BackBufferHeight / 2.0f));
 
 	pPresentationParameters->Windowed = 1;
 
@@ -92,7 +92,8 @@ void ForceWindowed(D3DPRESENT_PARAMETERS* pPresentationParameters)
 	pPresentationParameters->FullScreen_RefreshRateInHz = D3DPRESENT_RATE_DEFAULT;
 	pPresentationParameters->FullScreen_PresentationInterval = D3DPRESENT_INTERVAL_DEFAULT;
 
-	SetWindowPos(pPresentationParameters->hDeviceWindow, HWND_NOTOPMOST, left, top, pPresentationParameters->BackBufferWidth, pPresentationParameters->BackBufferHeight, SWP_SHOWWINDOW);
+	if (pPresentationParameters->hDeviceWindow != NULL)
+		SetWindowPos(pPresentationParameters->hDeviceWindow, HWND_NOTOPMOST, left, top, pPresentationParameters->BackBufferWidth, pPresentationParameters->BackBufferHeight, SWP_SHOWWINDOW);
 }
 
 HRESULT m_IDirect3D8::CreateDevice(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, IDirect3DDevice8** ppReturnedDeviceInterface)
