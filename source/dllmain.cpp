@@ -235,11 +235,12 @@ bool WINAPI DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
 
 			if (fFPSLimit > 0.0f)
 			{
-				mFPSLimitMode = (GetPrivateProfileInt("MAIN", "FPSLimitMode", 1, path) == 2) ? FrameLimiter::FPSLimitMode::FPS_ACCURATE : FrameLimiter::FPSLimitMode::FPS_REALTIME;
-				if (mFPSLimitMode == FrameLimiter::FPSLimitMode::FPS_ACCURATE)
+				FrameLimiter::FPSLimitMode mode = (GetPrivateProfileInt("MAIN", "FPSLimitMode", 1, path) == 2) ? FrameLimiter::FPSLimitMode::FPS_ACCURATE : FrameLimiter::FPSLimitMode::FPS_REALTIME;
+				if (mode == FrameLimiter::FPSLimitMode::FPS_ACCURATE)
 					timeBeginPeriod(1);
 
-				FrameLimiter::Init(mFPSLimitMode);
+				FrameLimiter::Init(mode);
+				mFPSLimitMode = mode;
 			}
 			else
 				mFPSLimitMode = FrameLimiter::FPSLimitMode::FPS_NONE;
