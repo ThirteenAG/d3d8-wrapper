@@ -45,6 +45,10 @@ private:
     static inline double TIME_Frametime = 0.0;
 
 public:
+    static inline ID3DXFont* pFPSFont = nullptr;
+    static inline ID3DXFont* pTimeFont = nullptr;
+
+public:
     enum FPSLimitMode { FPS_NONE, FPS_REALTIME, FPS_ACCURATE };
     static void Init(FPSLimitMode mode)
     {
@@ -97,8 +101,6 @@ public:
     static void ShowFPS(LPDIRECT3DDEVICE8 device)
     {
         static std::list<int> m_times;
-        static ID3DXFont* pFPSFont = nullptr;
-        static ID3DXFont* pTimeFont = nullptr;
 
         //https://github.com/microsoft/VCSamples/blob/master/VC2012Samples/Windows%208%20samples/C%2B%2B/Windows%208%20app%20samples/Direct2D%20geometry%20realization%20sample%20(Windows%208)/C%2B%2B/FPSCounter.cpp#L279
         LARGE_INTEGER frequency;
@@ -186,7 +188,6 @@ HRESULT m_IDirect3DDevice8::Present(CONST RECT* pSourceRect, CONST RECT* pDestRe
     return ProxyInterface->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
 }
 
-
 HRESULT m_IDirect3DDevice8::EndScene()
 {
     if (bDisplayFPSCounter)
@@ -262,6 +263,16 @@ HRESULT m_IDirect3D8::CreateDevice(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFo
         ForceWindowed(pPresentationParameters);
     }
 
+    if (bDisplayFPSCounter)
+    {
+        if (FrameLimiter::pFPSFont)
+            FrameLimiter::pFPSFont->Release();
+        if (FrameLimiter::pTimeFont)
+            FrameLimiter::pTimeFont->Release();
+        FrameLimiter::pFPSFont = nullptr;
+        FrameLimiter::pTimeFont = nullptr;
+    }
+
     HRESULT hr = ProxyInterface->CreateDevice(Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, ppReturnedDeviceInterface);
 
     if (SUCCEEDED(hr) && ppReturnedDeviceInterface)
@@ -275,6 +286,16 @@ HRESULT m_IDirect3DDevice8::Reset(D3DPRESENT_PARAMETERS* pPresentationParameters
 {
     if (bForceWindowedMode)
         ForceWindowed(pPresentationParameters);
+    
+    if (bDisplayFPSCounter)
+    {
+        if (FrameLimiter::pFPSFont)
+            FrameLimiter::pFPSFont->Release();
+        if (FrameLimiter::pTimeFont)
+            FrameLimiter::pTimeFont->Release();
+        FrameLimiter::pFPSFont = nullptr;
+        FrameLimiter::pTimeFont = nullptr;
+    }
 
     return ProxyInterface->Reset(pPresentationParameters);
 }
