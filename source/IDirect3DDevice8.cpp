@@ -59,10 +59,10 @@ ULONG m_IDirect3DDevice8::Release()
 //	return ProxyInterface->Reset(pPresentationParameters);
 //}
 
-HRESULT m_IDirect3DDevice8::EndScene()
-{
-	return ProxyInterface->EndScene();
-}
+//HRESULT m_IDirect3DDevice8::EndScene()
+//{
+//	return ProxyInterface->EndScene();
+//}
 
 void m_IDirect3DDevice8::SetCursorPosition(THIS_ UINT XScreenSpace, UINT YScreenSpace, DWORD Flags)
 {

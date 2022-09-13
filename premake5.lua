@@ -26,6 +26,7 @@ workspace "d3d8-wrapper"
    files { "source/*.def" }
    files { "source/*.rc" }
    includedirs { "source/dxsdk" }
+   libdirs { "source/dxsdk" }
 	  
    filter "configurations:Debug"
       defines "DEBUG"
@@ -36,3 +37,4 @@ workspace "d3d8-wrapper"
       optimize "On"
 
 project "d3d8-wrapper"
+   linkoptions "/SAFESEH:NO"
