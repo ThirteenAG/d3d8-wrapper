@@ -16,6 +16,7 @@
 
 #include "d3d8.h"
 #include <d3dx8.h>
+#include "iathook.h"
 #pragma comment (lib, "d3dx8.lib")
 #pragma comment (lib, "legacy_stdio_definitions.lib")
 #pragma comment(lib, "winmm.lib") // needed for timeBeginPeriod()/timeEndPeriod()
@@ -34,8 +35,10 @@ bool bUsePrimaryMonitor;
 bool bCenterWindow;
 bool bBorderlessFullscreen;
 bool bAlwaysOnTop;
+bool bDoNotNotifyOnTaskSwitch;
 bool bDisplayFPSCounter;
 float fFPSLimit;
+int nFullScreenRefreshRateInHz;
 
 class FrameLimiter
 {
@@ -116,11 +119,18 @@ public:
         if (m_times.size() >= 2)
             fps = static_cast<uint32_t>(0.5f + (static_cast<float>(m_times.size() - 1) * static_cast<float>(frequency.QuadPart)) / static_cast<float>(m_times.back() - m_times.front()));
 
+        static int space = 0;
         if (!pFPSFont || !pTimeFont)
         {
-            LOGFONT fps_font = { 35, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, "Arial" };
-            LOGFONT time_font = { 20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, "Arial" };
-
+            D3DDEVICE_CREATION_PARAMETERS cparams;
+            RECT rect;
+            device->GetCreationParameters(&cparams);
+            GetClientRect(cparams.hFocusWindow, &rect);
+            
+            LOGFONT fps_font = { rect.bottom / 20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, "Arial" };
+            LOGFONT time_font = { rect.bottom / 35, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, "Arial" };
+            space = rect.bottom / 20 + 5;
+            
             if (D3DXCreateFontIndirect(device, &fps_font, &pFPSFont) != D3D_OK)
                 return;
 
@@ -163,7 +173,7 @@ public:
             static char str_format_time[] = "%.01f ms";
             static const D3DXCOLOR YELLOW(D3DCOLOR_XRGB(0xF7, 0xF7, 0));
             DrawTextOutline(pFPSFont, 10, 10, YELLOW, str_format_fps, fps);
-            DrawTextOutline(pTimeFont, 10, 40, YELLOW, str_format_time, (1.0f / fps) * 1000.0f);
+            DrawTextOutline(pTimeFont, 10, space, YELLOW, str_format_time, (1.0f / fps) * 1000.0f);
         }
     }
 
@@ -255,6 +265,37 @@ void ForceWindowed(D3DPRESENT_PARAMETERS* pPresentationParameters)
     }
 }
 
+void ForceFullScreenRefreshRateInHz(D3DPRESENT_PARAMETERS* pPresentationParameters)
+{
+    if (!pPresentationParameters->Windowed)
+    {
+        std::vector<int> list;
+        DISPLAY_DEVICE dd;
+        dd.cb = sizeof(DISPLAY_DEVICE);
+        DWORD deviceNum = 0;
+        while (EnumDisplayDevices(NULL, deviceNum, &dd, 0))
+        {
+            DISPLAY_DEVICE newdd = { 0 };
+            newdd.cb = sizeof(DISPLAY_DEVICE);
+            DWORD monitorNum = 0;
+            DEVMODE dm = { 0 };
+            while (EnumDisplayDevices(dd.DeviceName, monitorNum, &newdd, 0))
+            {
+                for (auto iModeNum = 0; EnumDisplaySettings(NULL, iModeNum, &dm) != 0; iModeNum++)
+                    list.emplace_back(dm.dmDisplayFrequency);
+                monitorNum++;
+            }
+            deviceNum++;
+        }
+
+        std::sort(list.begin(), list.end());
+        if (nFullScreenRefreshRateInHz > list.back() || nFullScreenRefreshRateInHz < list.front() || nFullScreenRefreshRateInHz < 0)
+            pPresentationParameters->FullScreen_RefreshRateInHz = list.back();
+        else
+            pPresentationParameters->FullScreen_RefreshRateInHz = nFullScreenRefreshRateInHz;
+    }
+}
+
 HRESULT m_IDirect3D8::CreateDevice(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, IDirect3DDevice8** ppReturnedDeviceInterface)
 {
     if (bForceWindowedMode)
@@ -262,6 +303,9 @@ HRESULT m_IDirect3D8::CreateDevice(UINT Adapter, D3DDEVTYPE DeviceType, HWND hFo
         g_hFocusWindow = hFocusWindow;
         ForceWindowed(pPresentationParameters);
     }
+
+    if (nFullScreenRefreshRateInHz)
+        ForceFullScreenRefreshRateInHz(pPresentationParameters);
 
     if (bDisplayFPSCounter)
     {
@@ -286,6 +330,9 @@ HRESULT m_IDirect3DDevice8::Reset(D3DPRESENT_PARAMETERS* pPresentationParameters
 {
     if (bForceWindowedMode)
         ForceWindowed(pPresentationParameters);
+
+    if (nFullScreenRefreshRateInHz)
+        ForceFullScreenRefreshRateInHz(pPresentationParameters);
     
     if (bDisplayFPSCounter)
     {
@@ -298,6 +345,62 @@ HRESULT m_IDirect3DDevice8::Reset(D3DPRESENT_PARAMETERS* pPresentationParameters
     }
 
     return ProxyInterface->Reset(pPresentationParameters);
+}
+
+LRESULT(WINAPI* WndProc)(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+LRESULT WINAPI CustomWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    if (uMsg == WM_ACTIVATE || uMsg == WM_NCACTIVATE)
+    {
+        WndProc(hWnd, uMsg, wParam, lParam);
+
+        switch (LOWORD(wParam))
+        {
+        case WA_INACTIVE:
+            SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+            break;
+        default: // WA_ACTIVE or WA_CLICKACTIVE
+            SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+            break;
+        }
+
+        return 0;
+    }
+
+    return WndProc(hWnd, uMsg, wParam, lParam);
+}
+
+typedef ATOM(__stdcall* RegisterClassA_fn)(const WNDCLASSA*);
+typedef ATOM(__stdcall* RegisterClassW_fn)(const WNDCLASSW*);
+typedef ATOM(__stdcall* RegisterClassExA_fn)(const WNDCLASSEXA*);
+typedef ATOM(__stdcall* RegisterClassExW_fn)(const WNDCLASSEXW*);
+RegisterClassA_fn oRegisterClassA;
+RegisterClassW_fn oRegisterClassW;
+RegisterClassExA_fn oRegisterClassExA;
+RegisterClassExW_fn oRegisterClassExW;
+ATOM hk_RegisterClassA(WNDCLASSA* lpWndClass)
+{
+    WndProc = lpWndClass->lpfnWndProc;
+    lpWndClass->lpfnWndProc = CustomWndProc;
+    return oRegisterClassA(lpWndClass);
+}
+ATOM hk_RegisterClassW(WNDCLASSW* lpWndClass)
+{
+    WndProc = lpWndClass->lpfnWndProc;
+    lpWndClass->lpfnWndProc = CustomWndProc;
+    return oRegisterClassW(lpWndClass);
+}
+ATOM hk_RegisterClassExA(WNDCLASSEXA* lpWndClass)
+{
+    WndProc = lpWndClass->lpfnWndProc;
+    lpWndClass->lpfnWndProc = CustomWndProc;
+    return oRegisterClassExA(lpWndClass);
+}
+ATOM hk_RegisterClassExW(WNDCLASSEXW* lpWndClass)
+{
+    WndProc = lpWndClass->lpfnWndProc;
+    lpWndClass->lpfnWndProc = CustomWndProc;
+    return oRegisterClassExW(lpWndClass);
 }
 
 bool WINAPI DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
@@ -331,12 +434,14 @@ bool WINAPI DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
             bForceWindowedMode = GetPrivateProfileInt("MAIN", "ForceWindowedMode", 0, path) != 0;
             bDirect3D8DisableMaximizedWindowedModeShim = GetPrivateProfileInt("MAIN", "Direct3D8DisableMaximizedWindowedModeShim", 0, path) != 0;
             fFPSLimit = static_cast<float>(GetPrivateProfileInt("MAIN", "FPSLimit", 0, path));
+            nFullScreenRefreshRateInHz = GetPrivateProfileInt("MAIN", "FullScreenRefreshRateInHz", 0, path);
             bDisplayFPSCounter = GetPrivateProfileInt("MAIN", "DisplayFPSCounter", 0, path);
             bUsePrimaryMonitor = GetPrivateProfileInt("FORCEWINDOWED", "UsePrimaryMonitor", 0, path) != 0;
             bCenterWindow = GetPrivateProfileInt("FORCEWINDOWED", "CenterWindow", 1, path) != 0;
             bBorderlessFullscreen = GetPrivateProfileInt("FORCEWINDOWED", "BorderlessFullscreen", 0, path) != 0;
             bAlwaysOnTop = GetPrivateProfileInt("FORCEWINDOWED", "AlwaysOnTop", 0, path) != 0;
-
+            bDoNotNotifyOnTaskSwitch = GetPrivateProfileInt("FORCEWINDOWED", "DoNotNotifyOnTaskSwitch", 0, path) != 0;
+            
             if (fFPSLimit > 0.0f)
             {
                 FrameLimiter::FPSLimitMode mode = (GetPrivateProfileInt("MAIN", "FPSLimitMode", 1, path) == 2) ? FrameLimiter::FPSLimitMode::FPS_ACCURATE : FrameLimiter::FPSLimitMode::FPS_REALTIME;
@@ -360,6 +465,22 @@ bool WINAPI DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
                     *(unsigned*)(*(unsigned*)(addr + 2)) = 0;
                     VirtualProtect((LPVOID)(addr + 6), 4, Protect, &Protect);
                     bForceWindowedMode = false;
+                }
+            }
+
+            if (bDoNotNotifyOnTaskSwitch)
+            {
+                oRegisterClassA = (RegisterClassA_fn)Iat_hook::detour_iat_ptr("RegisterClassA", (void*)hk_RegisterClassA);
+                oRegisterClassW = (RegisterClassW_fn)Iat_hook::detour_iat_ptr("RegisterClassW", (void*)hk_RegisterClassW);
+                oRegisterClassExA = (RegisterClassExA_fn)Iat_hook::detour_iat_ptr("RegisterClassExA", (void*)hk_RegisterClassExA);
+                oRegisterClassExW = (RegisterClassExW_fn)Iat_hook::detour_iat_ptr("RegisterClassExW", (void*)hk_RegisterClassExW);
+                HMODULE user32 = GetModuleHandleA("user32.dll");
+                if (user32)
+                {
+                    Iat_hook::detour_iat_ptr("RegisterClassA", (void*)hk_RegisterClassA, user32);
+                    Iat_hook::detour_iat_ptr("RegisterClassW", (void*)hk_RegisterClassW, user32);
+                    Iat_hook::detour_iat_ptr("RegisterClassExA", (void*)hk_RegisterClassExA, user32);
+                    Iat_hook::detour_iat_ptr("RegisterClassExW", (void*)hk_RegisterClassExW, user32);
                 }
             }
         }
