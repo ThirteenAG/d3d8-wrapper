@@ -13,7 +13,7 @@ workspace "d3d8-wrapper"
    targetname "d3d8"
    targetextension ".dll"
    characterset ("MBCS")
-   flags { "StaticRuntime" }
+   staticruntime "On"
    
    defines { "rsc_CompanyName=\"ThirteenAG\"" }
    defines { "rsc_LegalCopyright=\"MIT License\""} 
