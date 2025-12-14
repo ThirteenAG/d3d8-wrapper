@@ -127,9 +127,9 @@ public:
             m_times.pop_front();
         m_times.push_back(static_cast<int>(time.QuadPart));
 
-        uint32_t fps = 0;
+        float fps = 0.0f;
         if (m_times.size() >= 2)
-            fps = static_cast<uint32_t>(0.5f + (static_cast<float>(m_times.size() - 1) * static_cast<float>(frequency.QuadPart)) / static_cast<float>(m_times.back() - m_times.front()));
+            fps = static_cast<float>(m_times.size() - 1) * static_cast<float>(frequency.QuadPart) / static_cast<float>(m_times.back() - m_times.front());
 
         static int space = 0;
         if (!pFPSFont || !pTimeFont)
@@ -181,7 +181,7 @@ public:
                 pFont->End();
             };
             
-            static char str_format_fps[] = "%02d";
+            static char str_format_fps[] = "%02.1f";
             static char str_format_time[] = "%.01f ms";
             static const D3DXCOLOR YELLOW(D3DCOLOR_XRGB(0xF7, 0xF7, 0));
             DrawTextOutline(pFPSFont, 10, 10, YELLOW, str_format_fps, fps);
@@ -822,7 +822,9 @@ bool WINAPI DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
 
             bForceWindowedMode = GetPrivateProfileInt("MAIN", "ForceWindowedMode", 0, path) != 0;
             bDirect3D8DisableMaximizedWindowedModeShim = GetPrivateProfileInt("MAIN", "Direct3D8DisableMaximizedWindowedModeShim", 0, path) != 0;
-            fFPSLimit = static_cast<float>(GetPrivateProfileInt("MAIN", "FPSLimit", 0, path));
+
+            static CHAR fpsLimitBuffer[16] = {}; GetPrivateProfileString("MAIN", "FPSLimit", "0", fpsLimitBuffer, sizeof(fpsLimitBuffer), path);
+            fFPSLimit = strtof(fpsLimitBuffer, nullptr);
             nFullScreenRefreshRateInHz = GetPrivateProfileInt("MAIN", "FullScreenRefreshRateInHz", 0, path);
             bDisplayFPSCounter = GetPrivateProfileInt("MAIN", "DisplayFPSCounter", 0, path);
             bUsePrimaryMonitor = GetPrivateProfileInt("FORCEWINDOWED", "UsePrimaryMonitor", 0, path) != 0;
