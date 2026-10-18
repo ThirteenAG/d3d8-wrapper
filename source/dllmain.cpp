@@ -41,7 +41,6 @@ bool bBorderlessFullscreen;
 bool bAlwaysOnTop;
 bool bDoNotNotifyOnTaskSwitch;
 bool bDisplayFPSCounter;
-bool bDisableScreenSaver;
 float fFPSLimit;
 int nFullScreenRefreshRateInHz;
 
@@ -826,17 +825,11 @@ bool WINAPI DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
             fFPSLimit = static_cast<float>(GetPrivateProfileInt("MAIN", "FPSLimit", 0, path));
             nFullScreenRefreshRateInHz = GetPrivateProfileInt("MAIN", "FullScreenRefreshRateInHz", 0, path);
             bDisplayFPSCounter = GetPrivateProfileInt("MAIN", "DisplayFPSCounter", 0, path);
-            bDisableScreenSaver = GetPrivateProfileInt("MAIN", "DisableScreenSaver", 0, path) != 0;
             bUsePrimaryMonitor = GetPrivateProfileInt("FORCEWINDOWED", "UsePrimaryMonitor", 0, path) != 0;
             bCenterWindow = GetPrivateProfileInt("FORCEWINDOWED", "CenterWindow", 1, path) != 0;
             bBorderlessFullscreen = GetPrivateProfileInt("FORCEWINDOWED", "BorderlessFullscreen", 0, path) != 0;
             bAlwaysOnTop = GetPrivateProfileInt("FORCEWINDOWED", "AlwaysOnTop", 0, path) != 0;
             bDoNotNotifyOnTaskSwitch = GetPrivateProfileInt("FORCEWINDOWED", "DoNotNotifyOnTaskSwitch", 0, path) != 0;
-
-            if (bDisableScreenSaver)
-            {
-                SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED);
-            }
             
             if (fFPSLimit > 0.0f)
             {
@@ -921,13 +914,7 @@ bool WINAPI DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
         {
             if (mFPSLimitMode == FrameLimiter::FPSLimitMode::FPS_ACCURATE)
                 timeEndPeriod(1);
-        
-        if (bDisableScreenSaver)
-        {
-            SetThreadExecutionState(ES_CONTINUOUS);
-        }
-        
-        if (d3d8dll)
+
             FreeLibrary(d3d8dll);
         }
         break;
